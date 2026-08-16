@@ -230,6 +230,9 @@ function fakeLlm(streamsByKey, failPrepare = [], defaultsByKey = {}) {
             : {}),
       }
       const chunks = streamsByKey[key] ?? [{ type: 'text-delta', index: 0, text: '?' }]
+      // A stream whose first chunk is an error finish has no output prefix —
+      // mimics an adapter failing before producing anything.
+      const noPrefix = chunks[0]?.type === 'finish' && chunks[0]?.reason?.kind === 'error'
       return {
         config: resolvedConfig,
         async *stream(forwarded) {
@@ -238,7 +241,7 @@ function fakeLlm(streamsByKey, failPrepare = [], defaultsByKey = {}) {
           if (!eq(forwarded, resolvedConfig)) {
             throw new Error('INVALID_PREPARED_CALL: prepared LLM call config changed before adapter dispatch')
           }
-          yield { type: 'text-delta', index: 0, text: `[${forwarded.provider}/${forwarded.model}]` }
+          if (!noPrefix) yield { type: 'text-delta', index: 0, text: `[${forwarded.provider}/${forwarded.model}]` }
           for (const chunk of chunks) yield chunk
         },
       }
@@ -419,12 +422,17 @@ test('stream: llm classifier uses prepared.config fields (adapter default effort
   assert.equal(chunks[0].text, '[deepseek-official/deepseek-v4-pro]')
 })
 
-test('stream: terminal error chunks from the delegated adapter are recorded for diagnostics', async () => {
+test('stream: terminal error chunks after output are passed through and recorded', async () => {
   const errorChunk = {
     type: 'finish',
     reason: { kind: 'error', failure: { code: 'QUOTA', message: 'provider quota exceeded' } },
   }
-  const llm = fakeLlm({ 'deepseek-official/deepseek-v4-pro': [errorChunk] })
+  // prefix chunk first: the adapter produced output, so the error passes
+  // through (no fallback) instead of throwing
+  const llm = fakeLlm({ 'deepseek-official/deepseek-v4-pro': [
+    { type: 'text-delta', index: 0, text: 'partial' },
+    errorChunk,
+  ] })
   const stats = createStats()
   const ctx = { get: () => undefined, llm, logger: { info: () => {} } }
   const router = new SmartRouterAdapter(ctx, () => settings({
@@ -432,11 +440,70 @@ test('stream: terminal error chunks from the delegated adapter are recorded for 
     hardModel: 'deepseek-v4-pro',
   }), { stats })
   const chunks = await collect(router.stream(optionsFor('重构 service 层，涉及 a.ts b.ts c.ts 三处架构调整')))
-  // the error chunk passes through unchanged (after the fake's text-delta prefix)
+  // the error chunk passes through unchanged
   assert.equal(chunks.at(-1).type, 'finish')
   assert.equal(chunks.at(-1).reason.failure.code, 'QUOTA')
   // and it lands in the stats ring for the settings card
   assert.equal(stats.snapshot().errors.length, 1)
   assert.equal(stats.snapshot().errors[0].target, 'deepseek-official/deepseek-v4-pro')
   assert.match(stats.snapshot().errors[0].message, /quota exceeded/)
+})
+
+test('stream: an adapter failing before any output falls back to the next route', async () => {
+  const errorChunk = {
+    type: 'finish',
+    reason: { kind: 'error', failure: { code: 'QUOTA', message: 'quota exceeded' } },
+  }
+  const llm = fakeLlm({
+    'deepseek-official/deepseek-v4-pro': [errorChunk],
+    'deepseek-official/deepseek-chat': [],
+  })
+  const stats = createStats()
+  const ctx = { get: () => undefined, llm, logger: { info: () => {} } }
+  const router = new SmartRouterAdapter(ctx, () => settings({
+    hardProvider: 'deepseek-official',
+    hardModel: 'deepseek-v4-pro',
+    normalProvider: 'deepseek-official',
+    normalModel: 'deepseek-chat',
+  }), { stats })
+  const chunks = await collect(router.stream(optionsFor('重构 service 层，涉及 a.ts b.ts c.ts 三处架构调整')))
+  // first route failed before output → chain moved to the normal tier
+  assert.equal(chunks[0].text, '[deepseek-official/deepseek-chat]')
+  assert.equal(llm.calls.length, 2)
+  assert.equal(stats.snapshot().errors.length, 1)
+  assert.equal(stats.snapshot().errors[0].target, 'deepseek-official/deepseek-v4-pro')
+})
+
+test('resolveChain: a history image (not just the last message) routes to the vision tier', async () => {
+  const router = adapter({
+    visionProvider: 'ovh-vision',
+    visionModel: 'Qwen2.5-VL-72B-Instruct',
+  })
+  const options = {
+    provider: 'smart-router',
+    model: 'smart',
+    messages: [
+      { role: 'user', content: [{ type: 'image', attachment: { id: 'sha256:old', mediaType: 'image/png' } }], source: { kind: 'user' } },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }], source: { kind: 'model' } },
+      { role: 'user', content: [{ type: 'text', text: '继续说' }], source: { kind: 'user' } },
+    ],
+    signal: undefined,
+  }
+  const resolved = await router.resolveChain(options)
+  assert.equal(resolved.hasImage, true)
+  assert.equal(resolved.kind, 'vision')
+  assert.equal(resolved.chain[0].provider, 'ovh-vision')
+})
+
+test('resolveChain: pure-text sessions stay on the difficulty tiers', async () => {
+  const router = adapter({
+    hardProvider: 'deepseek-official',
+    hardModel: 'deepseek-v4-pro',
+    normalProvider: 'deepseek-official',
+    normalModel: 'deepseek-chat',
+  })
+  const resolved = await router.resolveChain(optionsFor('修复这个 bug'))
+  assert.equal(resolved.hasImage, false)
+  assert.equal(resolved.kind, 'text')
+  assert.equal(resolved.level, 'normal')
 })
