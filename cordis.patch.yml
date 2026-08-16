@@ -1,0 +1,5 @@
+# dsh-smart-router composition patch: one loader entry.
+# Mounted automatically by `dsh plugin --profile web add dsh-smart-router`.
+- insert:
+    - id: dsh-smart-router
+      name: dsh-smart-router
