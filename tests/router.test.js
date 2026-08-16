@@ -188,8 +188,15 @@ test('stats: records per-kind counters', () => {
 
 // ---------- stream() integration with a fake llm service ----------
 
-/** A fake llm service recording prepareCall configs and streaming chunks back. */
-function fakeLlm(streamsByKey, failPrepare = []) {
+/**
+ * A fake llm service recording prepareCall configs and streaming chunks back.
+ * `defaultsByKey` simulates adapters that materialize a default
+ * reasoningEffort/maxTokens during prepareCall. The prepared stream mimics
+ * the real `callConfigEquals` guard: a forwarded request whose config fields
+ * differ from the resolved config throws INVALID_PREPARED_CALL, exactly like
+ * dsh-llm does.
+ */
+function fakeLlm(streamsByKey, failPrepare = [], defaultsByKey = {}) {
   const calls = []
   const llm = {
     calls,
@@ -197,9 +204,30 @@ function fakeLlm(streamsByKey, failPrepare = []) {
       calls.push({ config, signal })
       const key = `${config.provider}/${config.model}`
       if (failPrepare.includes(key)) throw new Error(`prepare ${key} failed`)
+      const defaults = defaultsByKey[key] ?? {}
+      const resolvedConfig = {
+        provider: config.provider,
+        model: config.model,
+        ...(config.reasoningEffort !== undefined
+          ? { reasoningEffort: config.reasoningEffort }
+          : defaults.reasoningEffort !== undefined
+            ? { reasoningEffort: defaults.reasoningEffort }
+            : {}),
+        ...(config.maxTokens !== undefined
+          ? { maxTokens: config.maxTokens }
+          : defaults.maxTokens !== undefined
+            ? { maxTokens: defaults.maxTokens }
+            : {}),
+      }
       const chunks = streamsByKey[key] ?? [{ type: 'text-delta', index: 0, text: '?' }]
       return {
+        config: resolvedConfig,
         async *stream(forwarded) {
+          const eq = (a, b) => a.provider === b.provider && a.model === b.model &&
+            a.reasoningEffort === b.reasoningEffort && a.maxTokens === b.maxTokens
+          if (!eq(forwarded, resolvedConfig)) {
+            throw new Error('INVALID_PREPARED_CALL: prepared LLM call config changed before adapter dispatch')
+          }
           yield { type: 'text-delta', index: 0, text: `[${forwarded.provider}/${forwarded.model}]` }
           for (const chunk of chunks) yield chunk
         },
@@ -312,5 +340,71 @@ test('stream: disabled passes through to the session default', async () => {
   const chunks = await collect(router.stream(optionsFor('hi')))
   assert.equal(llm.calls.length, 1)
   assert.deepEqual(llm.calls[0].config, { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+  assert.equal(chunks[0].text, '[deepseek-official/deepseek-v4-pro]')
+})
+
+test('stream: inherited maxTokens is not forwarded; prepared defaults are mirrored (no INVALID_PREPARED_CALL)', async () => {
+  // The smart seat may carry maxTokens/reasoningEffort, and the target
+  // adapter may materialize its own defaults — the forwarded request must
+  // mirror prepared.config exactly.
+  const llm = fakeLlm(
+    { 'deepseek-official/deepseek-v4-pro': [] },
+    [],
+    { 'deepseek-official/deepseek-v4-pro': { reasoningEffort: 'high', maxTokens: 8192 } },
+  )
+  const ctx = { get: () => undefined, llm, logger: { info: () => {} } }
+  const router = new SmartRouterAdapter(ctx, () => settings({
+    hardProvider: 'deepseek-official',
+    hardModel: 'deepseek-v4-pro',
+  }))
+  const options = optionsFor('重构 service 层，涉及 a.ts b.ts c.ts 三处架构调整')
+  options.maxTokens = 4096 // inherited from the smart model seat
+  options.reasoningEffort = 'off' // inherited too
+  const chunks = await collect(router.stream(options))
+  assert.equal(chunks[0].text, '[deepseek-official/deepseek-v4-pro]')
+  // prepareCall config stays minimal (no inherited maxTokens/effort)
+  assert.deepEqual(llm.calls[0].config, { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+})
+
+test('stream: tier effort overrides inherited effort and passes the prepared guard', async () => {
+  const llm = fakeLlm(
+    { 'deepseek-official/deepseek-v4-pro': [] },
+    [],
+    { 'deepseek-official/deepseek-v4-pro': { maxTokens: 8192 } },
+  )
+  const ctx = { get: () => undefined, llm, logger: { info: () => {} } }
+  const router = new SmartRouterAdapter(ctx, () => settings({
+    hardProvider: 'deepseek-official',
+    hardModel: 'deepseek-v4-pro',
+    hardEffort: 'max',
+  }))
+  const options = optionsFor('重构 service 层，涉及 a.ts b.ts c.ts 三处架构调整')
+  options.reasoningEffort = 'high' // inherited; tier effort must win
+  const chunks = await collect(router.stream(options))
+  assert.equal(chunks[0].text, '[deepseek-official/deepseek-v4-pro]')
+  assert.deepEqual(llm.calls[0].config, {
+    provider: 'deepseek-official',
+    model: 'deepseek-v4-pro',
+    reasoningEffort: 'max',
+  })
+})
+
+test('stream: llm classifier uses prepared.config fields (adapter default effort tolerated)', async () => {
+  const llm = fakeLlm(
+    { 'deepseek-official/deepseek-chat': [{ type: 'text-delta', index: 0, text: '{"level": "hard", "reason": "refactor"}' }] },
+    [],
+    { 'deepseek-official/deepseek-chat': { reasoningEffort: 'high' } },
+  )
+  const ctx = { get: () => undefined, llm, logger: { info: () => {} } }
+  const router = new SmartRouterAdapter(ctx, () => settings({
+    classifier: 'llm',
+    easyProvider: 'deepseek-official',
+    easyModel: 'deepseek-chat',
+    hardProvider: 'deepseek-official',
+    hardModel: 'deepseek-v4-pro',
+  }))
+  const chunks = await collect(router.stream(optionsFor('随便聊两句')))
+  // classifier call succeeded (no INVALID_PREPARED_CALL) and routed to hard
+  assert.equal(llm.calls.length, 2)
   assert.equal(chunks[0].text, '[deepseek-official/deepseek-v4-pro]')
 })
