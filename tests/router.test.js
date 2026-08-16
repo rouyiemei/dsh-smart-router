@@ -104,6 +104,31 @@ test('resolveChain: anti-recursion — session default equal to router is ignore
   assert.equal(resolved.kind, 'text')
 })
 
+test('resolveChain: anti-recursion — tiers configured to the router itself are dropped', () => {
+  const router = adapter({
+    hardProvider: 'smart-router',
+    hardModel: 'smart',
+    normalProvider: 'deepseek-official',
+    normalModel: 'deepseek-chat',
+  })
+  const resolved = router.resolveChain(optionsFor('重构 service 层，涉及 a.ts b.ts c.ts 三处架构调整'))
+  assert.ok(resolved.chain.every((c) => c.provider !== 'smart-router'))
+  assert.equal(resolved.chain[0].provider, 'deepseek-official')
+  assert.equal(resolved.chain[0].model, 'deepseek-chat')
+})
+
+test('resolveChain: anti-recursion — vision tier and fallback route to the router are dropped', () => {
+  const router = adapter({
+    visionProvider: 'smart-router',
+    visionModel: 'smart',
+    visionFallbacks: [{ provider: 'smart-router', model: 'smart' }],
+  }, { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+  const resolved = router.resolveChain(optionsFor('看图', { withImage: true }))
+  assert.ok(resolved.chain.every((c) => c.provider !== 'smart-router'))
+  assert.equal(resolved.chain.length, 1)
+  assert.equal(resolved.chain[0].model, 'deepseek-v4-pro')
+})
+
 test('resolveChain: vision fallbacks appended after vision tier', () => {
   const router = adapter({
     visionProvider: 'ovh-vision',
