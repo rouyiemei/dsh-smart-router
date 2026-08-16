@@ -44,28 +44,28 @@ function optionsFor(text, { withImage = false } = {}) {
   }
 }
 
-test('resolveChain: vision request routes to vision tier first', () => {
+test('', async () => {
   const router = adapter({
     visionProvider: 'zhipu-vision',
     visionModel: 'glm-4v-flash',
     easyProvider: 'deepseek-official',
     easyModel: 'deepseek-chat',
   })
-  const resolved = router.resolveChain(optionsFor('看看这张图', { withImage: true }))
+  const resolved = await router.resolveChain(optionsFor('看看这张图', { withImage: true }))
   assert.equal(resolved.kind, 'vision')
   assert.equal(resolved.hasImage, true)
   assert.equal(resolved.chain[0].provider, 'zhipu-vision')
   assert.equal(resolved.chain[0].model, 'glm-4v-flash')
 })
 
-test('resolveChain: text request classified hard → hard tier, then ladder', () => {
+test('', async () => {
   const router = adapter({
     hardProvider: 'deepseek-official',
     hardModel: 'deepseek-v4-pro',
     normalProvider: 'deepseek-official',
     normalModel: 'deepseek-chat',
   })
-  const resolved = router.resolveChain(optionsFor('重构整个 service 层，涉及 a.ts b.ts c.ts 三处架构调整'))
+  const resolved = await router.resolveChain(optionsFor('重构整个 service 层，涉及 a.ts b.ts c.ts 三处架构调整'))
   assert.equal(resolved.level, 'hard')
   assert.equal(resolved.chain[0].provider, 'deepseek-official')
   assert.equal(resolved.chain[0].model, 'deepseek-v4-pro')
@@ -73,69 +73,69 @@ test('resolveChain: text request classified hard → hard tier, then ladder', ()
   assert.equal(resolved.chain[1].model, 'deepseek-chat')
 })
 
-test('resolveChain: missing tier falls back through ladder to default model', () => {
+test('', async () => {
   const router = adapter(
     { easyProvider: 'deepseek-official', easyModel: 'deepseek-chat' },
     { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
   )
-  const resolved = router.resolveChain(optionsFor('修复这个 bug'))
+  const resolved = await router.resolveChain(optionsFor('修复这个 bug'))
   assert.equal(resolved.level, 'normal')
   assert.deepEqual(resolved.chain.map((c) => c.model), ['deepseek-chat', 'deepseek-v4-pro'])
 })
 
-test('resolveChain: no tiers at all → session default model only', () => {
+test('', async () => {
   const router = adapter({}, { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
-  const resolved = router.resolveChain(optionsFor('你好'))
+  const resolved = await router.resolveChain(optionsFor('你好'))
   assert.equal(resolved.chain.length, 1)
   assert.equal(resolved.chain[0].provider, 'deepseek-official')
   assert.equal(resolved.chain[0].model, 'deepseek-v4-pro')
 })
 
-test('resolveChain: disabled → no routing chain (stream delegates to default)', () => {
+test('', async () => {
   const router = adapter({ enabled: false })
-  const resolved = router.resolveChain(optionsFor('hi'))
+  const resolved = await router.resolveChain(optionsFor('hi'))
   assert.equal(resolved.kind, 'disabled')
 })
 
-test('resolveChain: anti-recursion — session default equal to router is ignored', () => {
+test('', async () => {
   const router = adapter({}, { provider: 'smart-router', model: 'smart' })
-  const resolved = router.resolveChain(optionsFor('hi'))
+  const resolved = await router.resolveChain(optionsFor('hi'))
   assert.equal(resolved.chain.length, 0)
   assert.equal(resolved.kind, 'text')
 })
 
-test('resolveChain: anti-recursion — tiers configured to the router itself are dropped', () => {
+test('', async () => {
   const router = adapter({
     hardProvider: 'smart-router',
     hardModel: 'smart',
     normalProvider: 'deepseek-official',
     normalModel: 'deepseek-chat',
   })
-  const resolved = router.resolveChain(optionsFor('重构 service 层，涉及 a.ts b.ts c.ts 三处架构调整'))
+  const resolved = await router.resolveChain(optionsFor('重构 service 层，涉及 a.ts b.ts c.ts 三处架构调整'))
   assert.ok(resolved.chain.every((c) => c.provider !== 'smart-router'))
   assert.equal(resolved.chain[0].provider, 'deepseek-official')
   assert.equal(resolved.chain[0].model, 'deepseek-chat')
 })
 
-test('resolveChain: anti-recursion — vision tier and fallback route to the router are dropped', () => {
+test('', async () => {
   const router = adapter({
     visionProvider: 'smart-router',
     visionModel: 'smart',
     visionFallbacks: [{ provider: 'smart-router', model: 'smart' }],
   }, { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
-  const resolved = router.resolveChain(optionsFor('看图', { withImage: true }))
+  const resolved = await router.resolveChain(optionsFor('看图', { withImage: true }))
   assert.ok(resolved.chain.every((c) => c.provider !== 'smart-router'))
   assert.equal(resolved.chain.length, 1)
   assert.equal(resolved.chain[0].model, 'deepseek-v4-pro')
 })
 
-test('resolveChain: vision fallbacks appended after vision tier', () => {
+test('', async () => {
   const router = adapter({
     visionProvider: 'ovh-vision',
     visionModel: 'Qwen2.5-VL-72B-Instruct',
     visionFallbacks: [{ provider: 'zhipu-vision', model: 'glm-4v-flash' }],
   }, { provider: 'deepseek-official', model: 'deepseek-v4-pro' })
-  const resolved = router.resolveChain(optionsFor('看图', { withImage: true }))
+  const resolved = await router.resolveChain(optionsFor('看图', { withImage: true }))
   assert.deepEqual(resolved.chain.map((c) => `${c.provider}/${c.model}`), [
     'ovh-vision/Qwen2.5-VL-72B-Instruct',
     'zhipu-vision/glm-4v-flash',
@@ -143,19 +143,19 @@ test('resolveChain: vision fallbacks appended after vision tier', () => {
   ])
 })
 
-test('resolveChain: deduplicates repeated routes in the chain', () => {
+test('', async () => {
   const router = adapter({
     hardProvider: 'deepseek-official',
     hardModel: 'deepseek-v4-pro',
     normalProvider: 'deepseek-official',
     normalModel: 'deepseek-v4-pro',
   })
-  const resolved = router.resolveChain(optionsFor('修复这个 bug'))
+  const resolved = await router.resolveChain(optionsFor('修复这个 bug'))
   const keys = resolved.chain.map((c) => `${c.provider}/${c.model}`)
   assert.equal(new Set(keys).size, keys.length)
 })
 
-test('lastUserMessage: picks the latest user message with content', () => {
+test('', async () => {
   const messages = [
     { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
     { role: 'user', content: [{ type: 'text', text: 'first' }], source: { kind: 'user' } },
@@ -166,7 +166,7 @@ test('lastUserMessage: picks the latest user message with content', () => {
   assert.equal(lastUserMessage(undefined), undefined)
 })
 
-test('failureChunk: error finish chunk shape', () => {
+test('', async () => {
   const chunk = failureChunk('boom', 'NO_ROUTE')
   assert.equal(chunk.type, 'finish')
   assert.equal(chunk.reason.kind, 'error')
@@ -174,7 +174,7 @@ test('failureChunk: error finish chunk shape', () => {
   assert.equal(chunk.reason.failure.message, 'boom')
 })
 
-test('stats: records per-kind counters', () => {
+test('', async () => {
   const stats = createStats()
   stats.record('hard')
   stats.record('vision')
@@ -184,6 +184,16 @@ test('stats: records per-kind counters', () => {
   assert.equal(snapshot.vision, 1)
   assert.equal(snapshot.error, 1)
   assert.equal(snapshot.normal, 0)
+})
+
+test('stats: recordError keeps a bounded ring of recent failures', () => {
+  const stats = createStats()
+  for (let i = 0; i < 12; i += 1) stats.recordError(`p${i}/m${i}`, `err ${i}`)
+  const snapshot = stats.snapshot()
+  assert.equal(snapshot.errors.length, 8)
+  assert.equal(snapshot.errors[0].target, 'p4/m4') // oldest kept
+  assert.equal(snapshot.errors[7].target, 'p11/m11') // newest
+  assert.ok(snapshot.errors[0].at)
 })
 
 // ---------- stream() integration with a fake llm service ----------
@@ -407,4 +417,26 @@ test('stream: llm classifier uses prepared.config fields (adapter default effort
   // classifier call succeeded (no INVALID_PREPARED_CALL) and routed to hard
   assert.equal(llm.calls.length, 2)
   assert.equal(chunks[0].text, '[deepseek-official/deepseek-v4-pro]')
+})
+
+test('stream: terminal error chunks from the delegated adapter are recorded for diagnostics', async () => {
+  const errorChunk = {
+    type: 'finish',
+    reason: { kind: 'error', failure: { code: 'QUOTA', message: 'provider quota exceeded' } },
+  }
+  const llm = fakeLlm({ 'deepseek-official/deepseek-v4-pro': [errorChunk] })
+  const stats = createStats()
+  const ctx = { get: () => undefined, llm, logger: { info: () => {} } }
+  const router = new SmartRouterAdapter(ctx, () => settings({
+    hardProvider: 'deepseek-official',
+    hardModel: 'deepseek-v4-pro',
+  }), { stats })
+  const chunks = await collect(router.stream(optionsFor('重构 service 层，涉及 a.ts b.ts c.ts 三处架构调整')))
+  // the error chunk passes through unchanged (after the fake's text-delta prefix)
+  assert.equal(chunks.at(-1).type, 'finish')
+  assert.equal(chunks.at(-1).reason.failure.code, 'QUOTA')
+  // and it lands in the stats ring for the settings card
+  assert.equal(stats.snapshot().errors.length, 1)
+  assert.equal(stats.snapshot().errors[0].target, 'deepseek-official/deepseek-v4-pro')
+  assert.match(stats.snapshot().errors[0].message, /quota exceeded/)
 })
