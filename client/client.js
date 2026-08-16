@@ -2,9 +2,11 @@
  * dsh-smart-router client bundle: the "Smart Router" settings section.
  *
  * Hand-written `window.__ModuleLoader__` bundle (no build step): registers a
- * `settings.section` slot whose page reads the live model catalog from the
- * host (`/smart-router/api/models`) and writes tier selections through the
- * settings scope. Every change applies immediately (host-side hot config).
+ * `settings.section` slot whose page reads the live model catalog and the
+ * resolved configuration from the host (`/smart-router/api/*`) and writes
+ * changes back through the same API. The host-side settings service is used
+ * directly instead of the client settings wire, because the host only
+ * exposes allow-listed namespaces to configuration clients.
  */
 window.__ModuleLoader__.load({
   id: 'dsh-smart-router',
@@ -20,10 +22,8 @@ window.__ModuleLoader__.load({
       useEffect,
       useMemo,
       useState,
-      useSyncExternalStore,
     } = react
 
-    const NAMESPACE = 'smart-router'
     const NS = 'dsh-smart-router'
     const TIERS = [
       { key: 'hard', labelKey: 'tier.hard', hintKey: 'tier.hard.hint' },
@@ -52,13 +52,19 @@ window.__ModuleLoader__.load({
       'fallback.hint': '留空 = 使用会话当前默认模型。档位缺失时按 困难→一般→简单→默认 回退。',
       'section.llm': 'LLM 分类器（可选）',
       'llm.hint': '留空 = 复用「简单任务」档模型。',
+      'tier.hard': '困难任务',
+      'tier.hard.hint': '架构设计、跨文件重构、疑难 bug 根因、性能/安全专项',
+      'tier.normal': '一般任务',
+      'tier.normal.hint': '单文件改动、常规功能实现、写测试、普通调试',
+      'tier.easy': '简单任务',
+      'tier.easy.hint': '闲聊、确认、收尾、简短翻译/解释、读单文件',
+      'tier.vision': '视觉任务',
+      'tier.vision.hint': '图片/截图/OCR 等含图请求自动走此档',
       provider: '提供方',
       model: '模型',
       effort: '思考档位',
       reset: '重置',
       'reset.all': '恢复默认设置',
-      'vision.free': '免费',
-      'vision.anonymous': '匿名免 Key',
       'vision.ok': '支持图片',
       'vision.unknown': '能力未知',
       'vision.novision': '不支持图片',
@@ -71,13 +77,14 @@ window.__ModuleLoader__.load({
       'stats.normal': '一般',
       'stats.easy': '简单',
       'stats.vision': '视觉',
-      'stats.fallback': '回退',
       'stats.error': '错误',
       defaultModel: '当前默认模型',
       empty: '（未配置）',
       loading: '加载中…',
-      loadError: '目录加载失败',
+      loadError: '加载失败',
       saveError: '保存失败',
+      saving: '保存中…',
+      readOnly: '当前设置为只读，无法保存',
     }
     const en = {
       nav: 'Smart Router',
@@ -100,13 +107,19 @@ window.__ModuleLoader__.load({
       'fallback.hint': 'Empty = the session default model. Missing tiers fall back hard → normal → easy → default.',
       'section.llm': 'LLM classifier (optional)',
       'llm.hint': 'Empty = reuse the easy-tier model.',
+      'tier.hard': 'Hard tasks',
+      'tier.hard.hint': 'Architecture, cross-file refactoring, tricky root-cause analysis, performance/security',
+      'tier.normal': 'Normal tasks',
+      'tier.normal.hint': 'Single-file changes, small features, writing tests, routine debugging',
+      'tier.easy': 'Easy tasks',
+      'tier.easy.hint': 'Small talk, confirmations, wrap-ups, short translation/explanation, reading one file',
+      'tier.vision': 'Vision tasks',
+      'tier.vision.hint': 'Requests with images (screenshots, OCR, …) go here automatically',
       provider: 'Provider',
       model: 'Model',
       effort: 'Effort',
       reset: 'Reset',
       'reset.all': 'Restore defaults',
-      'vision.free': 'Free',
-      'vision.anonymous': 'Anonymous, no key',
       'vision.ok': 'Vision',
       'vision.unknown': 'Capability unknown',
       'vision.novision': 'No image input',
@@ -120,13 +133,14 @@ window.__ModuleLoader__.load({
       'stats.normal': 'Normal',
       'stats.easy': 'Easy',
       'stats.vision': 'Vision',
-      'stats.fallback': 'Fallback',
       'stats.error': 'Errors',
       defaultModel: 'Current default model',
       empty: '(not set)',
       loading: 'Loading…',
-      loadError: 'Catalog load failed',
+      loadError: 'Load failed',
       saveError: 'Save failed',
+      saving: 'Saving…',
+      readOnly: 'Settings are read-only; changes cannot be saved',
     }
 
     // ---------- minimal dark-friendly styling (alpha-based, theme-agnostic) ----------
@@ -206,14 +220,16 @@ window.__ModuleLoader__.load({
       const group = groups.find((g) => g.id === provider)
       return group !== undefined ? group.name : provider
     }
+    /** Provider groups the pickers may offer (never the router itself). */
+    const pickableGroups = (groups) => (groups ?? []).filter((g) => g.id !== 'smart-router')
 
     function Option({ value, label }) {
       return h('option', { value }, label)
     }
 
     /** Provider + model + effort selects for one tier row. */
-    function RouteRow({ t, tier, value, catalog, onChange, visionOnly }) {
-      const groups = catalog.groups ?? []
+    function RouteRow({ t, tier, value, catalog, onChange, visionOnly, colorScheme, disabled }) {
+      const groups = pickableGroups(catalog.groups)
       const providerOptions = useMemo(() => {
         const list = groups
           .map((g) => ({ id: g.id, name: g.name }))
@@ -244,6 +260,7 @@ window.__ModuleLoader__.load({
         return Array.isArray(efforts) ? efforts : []
       }, [chosen, value.model])
 
+      const selectStyle = { ...S.select, colorScheme }
       const visionBadge = (m) => {
         if (m === undefined) return null
         if (m.vision === true) {
@@ -260,17 +277,18 @@ window.__ModuleLoader__.load({
         h('div', { style: S.row },
           h('div', { style: { ...S.label, minWidth: 72 } }, t(tier.labelKey)),
           h('select', {
-            style: S.select,
+            style: selectStyle,
             value: value.provider,
+            disabled,
             onChange: (e) => onChange('provider', e.target.value),
           },
             h(Option, { value: '', label: t('empty') }),
             providerOptions.map((p) => h(Option, { key: p.id, value: p.id, label: p.name })),
           ),
           h('select', {
-            style: { ...S.select, maxWidth: 260 },
+            style: { ...selectStyle, maxWidth: 260 },
             value: value.model,
-            disabled: value.provider === '',
+            disabled: disabled || value.provider === '',
             onChange: (e) => onChange('model', e.target.value),
           },
             h(Option, { value: '', label: t('empty') }),
@@ -279,9 +297,9 @@ window.__ModuleLoader__.load({
           visionBadge(chosenModel),
           effortOptions.length > 0
             ? h('select', {
-                style: { ...S.select, maxWidth: 120 },
+                style: { ...selectStyle, maxWidth: 120 },
                 value: value.effort,
-                disabled: value.model === '',
+                disabled: disabled || value.model === '',
                 onChange: (e) => onChange('effort', e.target.value),
               },
                 h(Option, { value: '', label: `${t('effort')}: ${t('empty')}` }),
@@ -290,6 +308,7 @@ window.__ModuleLoader__.load({
             : null,
           h('button', {
             style: S.button,
+            disabled,
             onClick: () => {
               onChange('provider', '')
               onChange('model', '')
@@ -303,17 +322,25 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** The settings section body. */
-    function SmartRouterSection({ t, scope }) {
-      const snapshot = useSyncExternalStore(
-        (cb) => scope.subscribe(cb),
-        () => scope.getSnapshot(),
-      )
-      const value = snapshot.value ?? {}
+    /** The settings section body; all data flows through the host API. */
+    function SmartRouterSection({ t, colorScheme }) {
+      const [config, setConfig] = useState(null)
+      const [writable, setWritable] = useState(true)
       const [catalog, setCatalog] = useState({ groups: [], failures: [], defaultModel: null })
       const [catalogError, setCatalogError] = useState(false)
       const [stats, setStats] = useState(null)
       const [saving, setSaving] = useState(false)
+      const [saveFailed, setSaveFailed] = useState(false)
+
+      const loadConfig = async () => {
+        try {
+          const res = await fetch('/smart-router/api/config')
+          if (!res.ok) throw new Error(String(res.status))
+          const data = await res.json()
+          setConfig(data.config ?? data.defaults ?? {})
+          setWritable(data.writable !== false)
+        } catch { /* keep last config */ }
+      }
 
       useEffect(() => {
         let alive = true
@@ -337,6 +364,7 @@ window.__ModuleLoader__.load({
             }
           } catch { /* stats are optional */ }
         }
+        void loadConfig()
         void load()
         const timer = setInterval(() => {
           void (async () => {
@@ -355,17 +383,33 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
-      const write = (field, fieldValue) => {
+      const write = async (field, fieldValue) => {
+        if (!writable) return
         setSaving(true)
-        const promise = fieldValue === ''
-          ? scope.unset(field)
-          : scope.set(field, fieldValue)
-        promise.then(() => setSaving(false), () => setSaving(false))
+        setSaveFailed(false)
+        try {
+          const res = await fetch('/smart-router/api/config', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ field, value: fieldValue === '' ? null : fieldValue }),
+          })
+          const data = await res.json()
+          if (!res.ok || data.ok !== true) {
+            setSaveFailed(true)
+            return
+          }
+          if (data.config !== undefined && data.config !== null) setConfig(data.config)
+        } catch {
+          setSaveFailed(true)
+        } finally {
+          setSaving(false)
+        }
       }
       const tierOnChange = (tierKey) => (field, fieldValue) => {
-        write(fieldPath(tierKey, field), fieldValue)
+        void write(fieldPath(tierKey, field), fieldValue)
       }
 
+      const value = config ?? {}
       const fallbackValue = {
         provider: String(value.fallbackProvider ?? ''),
         model: String(value.fallbackModel ?? ''),
@@ -375,6 +419,35 @@ window.__ModuleLoader__.load({
         model: String(value.llmClassifierModel ?? ''),
       }
       const defaultModel = catalog.defaultModel
+      const groups = pickableGroups(catalog.groups)
+      const groupSelect = (current, onChange) => h('select', {
+        style: { ...S.select, colorScheme },
+        value: current,
+        disabled: !writable,
+        onChange: (e) => onChange(e.target.value),
+      },
+        h(Option, { value: '', label: t('empty') }),
+        groups
+          .slice()
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((g) => h(Option, { key: g.id, value: g.id, label: g.name })),
+      )
+      const modelSelect = (provider, current, onChange, visionOnly) => h('select', {
+        style: { ...S.select, maxWidth: 260, colorScheme },
+        value: current,
+        disabled: !writable || provider === '',
+        onChange: (e) => onChange(e.target.value),
+      },
+        h(Option, { value: '', label: t('empty') }),
+        (() => {
+          const group = groups.find((g) => g.id === provider)
+          let models = (group?.models ?? []).filter((m) => !visionOnly || m.vision !== false)
+          if (current !== '' && !models.some((m) => m.id === current)) {
+            models = models.concat({ id: current, name: current, vision: null })
+          }
+          return models.map((m) => h(Option, { key: m.id, value: m.id, label: m.name }))
+        })(),
+      )
 
       const resetAll = () => {
         const fields = []
@@ -382,8 +455,8 @@ window.__ModuleLoader__.load({
           fields.push(fieldPath(tier.key, 'provider'), fieldPath(tier.key, 'model'), fieldPath(tier.key, 'effort'))
         }
         fields.push('fallbackProvider', 'fallbackModel', 'llmClassifierProvider', 'llmClassifierModel', 'visionFallbacks')
-        for (const field of fields) scope.unset(field)
-        write('classifier', 'heuristic')
+        fields.push('classifier')
+        for (const field of fields) void write(field, '')
       }
 
       return h(Fragment, {},
@@ -393,7 +466,8 @@ window.__ModuleLoader__.load({
             h('input', {
               type: 'checkbox',
               checked: value.enabled !== false,
-              onChange: (e) => write('enabled', e.target.checked),
+              disabled: !writable,
+              onChange: (e) => void write('enabled', e.target.checked),
             }),
             h('label', { style: { fontSize: 13, fontWeight: 600 } }, t('enable')),
           ),
@@ -403,9 +477,10 @@ window.__ModuleLoader__.load({
           h('div', { style: S.row },
             h('div', { style: { ...S.label, minWidth: 72 } }, t('classifier')),
             h('select', {
-              style: S.select,
+              style: { ...S.select, colorScheme },
               value: String(value.classifier ?? 'heuristic'),
-              onChange: (e) => write('classifier', e.target.value),
+              disabled: !writable,
+              onChange: (e) => void write('classifier', e.target.value),
             },
               h(Option, { value: 'heuristic', label: t('classifier.heuristic') }),
               h(Option, { value: 'llm', label: t('classifier.llm') }),
@@ -424,39 +499,17 @@ window.__ModuleLoader__.load({
             catalog,
             onChange: tierOnChange(tier.key),
             visionOnly: false,
+            colorScheme,
+            disabled: !writable,
           })),
         ),
         h('div', { style: S.card },
           h('div', { style: S.row },
             h('div', { style: { ...S.label, minWidth: 72 } }, t('tier.vision')),
-            h('select', {
-              style: S.select,
-              value: String(value.visionProvider ?? ''),
-              onChange: (e) => write('visionProvider', e.target.value),
-            },
-              h(Option, { value: '', label: t('empty') }),
-              (catalog.groups ?? [])
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map((g) => h(Option, { key: g.id, value: g.id, label: g.name })),
-            ),
-            h('select', {
-              style: { ...S.select, maxWidth: 280 },
-              value: String(value.visionModel ?? ''),
-              disabled: String(value.visionProvider ?? '') === '',
-              onChange: (e) => write('visionModel', e.target.value),
-            },
-              h(Option, { value: '', label: t('empty') }),
-              (() => {
-                const group = (catalog.groups ?? []).find((g) => g.id === value.visionProvider)
-                const models = (group?.models ?? []).filter((m) => m.vision !== false)
-                if (value.visionModel !== '' && !models.some((m) => m.id === value.visionModel)) {
-                  models.push({ id: value.visionModel, name: value.visionModel, vision: null })
-                }
-                return models.map((m) => h(Option, { key: m.id, value: m.id, label: m.name }))
-              })(),
-            ),
+            groupSelect(String(value.visionProvider ?? ''), (v) => void write('visionProvider', v)),
+            modelSelect(String(value.visionProvider ?? ''), String(value.visionModel ?? ''), (v) => void write('visionModel', v), true),
             (() => {
-              const group = (catalog.groups ?? []).find((g) => g.id === value.visionProvider)
+              const group = groups.find((g) => g.id === value.visionProvider)
               const model = (group?.models ?? []).find((m) => m.id === value.visionModel)
               if (model === undefined) return null
               const free = value.visionProvider === 'ovh-vision' || value.visionProvider === 'zhipu-vision'
@@ -470,9 +523,10 @@ window.__ModuleLoader__.load({
             })(),
             h('button', {
               style: S.button,
+              disabled: !writable,
               onClick: () => {
-                write('visionProvider', '')
-                write('visionModel', '')
+                void write('visionProvider', '')
+                void write('visionModel', '')
               },
             }, t('reset')),
           ),
@@ -482,32 +536,12 @@ window.__ModuleLoader__.load({
         h('div', { style: S.card },
           h('div', { style: S.row },
             h('div', { style: { ...S.label, minWidth: 72 } }, '↳'),
-            h('select', {
-              style: S.select,
-              value: fallbackValue.provider,
-              onChange: (e) => write('fallbackProvider', e.target.value),
-            },
-              h(Option, { value: '', label: t('empty') }),
-              (catalog.groups ?? [])
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map((g) => h(Option, { key: g.id, value: g.id, label: g.name })),
-            ),
-            h('select', {
-              style: { ...S.select, maxWidth: 260 },
-              value: fallbackValue.model,
-              disabled: fallbackValue.provider === '',
-              onChange: (e) => write('fallbackModel', e.target.value),
-            },
-              h(Option, { value: '', label: t('empty') }),
-              (() => {
-                const group = (catalog.groups ?? []).find((g) => g.id === fallbackValue.provider)
-                return (group?.models ?? []).map((m) => h(Option, { key: m.id, value: m.id, label: m.name }))
-              })(),
-            ),
+            groupSelect(fallbackValue.provider, (v) => void write('fallbackProvider', v)),
+            modelSelect(fallbackValue.provider, fallbackValue.model, (v) => void write('fallbackModel', v), false),
           ),
           h('div', { style: S.hint },
-            defaultModel !== null
-              ? `${t('defaultModel')}: ${labelOf(catalog.groups, defaultModel.provider)} / ${defaultModel.model}`
+            defaultModel !== null && defaultModel.provider
+              ? `${t('defaultModel')}: ${labelOf(groups, defaultModel.provider)} / ${defaultModel.model}`
               : null,
             h('span', {}, ` — ${t('fallback.hint')}`),
           ),
@@ -517,36 +551,18 @@ window.__ModuleLoader__.load({
               h('div', { style: S.title }, t('section.llm')),
               h('div', { style: S.card },
                 h('div', { style: S.row },
-                  h('select', {
-                    style: S.select,
-                    value: llmValue.provider,
-                    onChange: (e) => write('llmClassifierProvider', e.target.value),
-                  },
-                    h(Option, { value: '', label: t('empty') }),
-                    (catalog.groups ?? [])
-                      .sort((a, b) => a.name.localeCompare(b.name))
-                      .map((g) => h(Option, { key: g.id, value: g.id, label: g.name })),
-                  ),
-                  h('select', {
-                    style: { ...S.select, maxWidth: 260 },
-                    value: llmValue.model,
-                    disabled: llmValue.provider === '',
-                    onChange: (e) => write('llmClassifierModel', e.target.value),
-                  },
-                    h(Option, { value: '', label: t('empty') }),
-                    (() => {
-                      const group = (catalog.groups ?? []).find((g) => g.id === llmValue.provider)
-                      return (group?.models ?? []).map((m) => h(Option, { key: m.id, value: m.id, label: m.name }))
-                    })(),
-                  ),
+                  groupSelect(llmValue.provider, (v) => void write('llmClassifierProvider', v)),
+                  modelSelect(llmValue.provider, llmValue.model, (v) => void write('llmClassifierModel', v), false),
                 ),
                 h('div', { style: S.hint }, t('llm.hint')),
               ),
             )
           : null,
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 } },
-          h('button', { style: S.button, onClick: resetAll }, t('reset.all')),
-          saving ? h('span', { style: S.stat }, t('saveError')) : null,
+          h('button', { style: S.button, disabled: !writable || saving, onClick: resetAll }, t('reset.all')),
+          saving ? h('span', { style: S.stat }, t('saving')) : null,
+          saveFailed ? h('span', { style: { ...S.stat, color: 'rgba(220,80,80,1)' } }, t('saveError')) : null,
+          !writable ? h('span', { style: { ...S.stat, color: 'rgba(220,180,60,1)' } }, t('readOnly')) : null,
           stats !== null
             ? h(Fragment, {},
                 h('span', { style: S.stat }, `${t('stats')}:`),
@@ -568,6 +584,14 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-smart-router: locale')
       const t = ctx.locale.bind(NS)
+      // Native select dropdowns inherit the page color scheme; force the
+      // dropdown list to match the active theme so options stay readable
+      // (dark theme → dark list with light text).
+      let colorScheme = 'dark'
+      try {
+        const theme = ctx.theme?.getTheme?.()
+        if (theme === 'light') colorScheme = 'light'
+      } catch { /* keep default */ }
       ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section',
         id: 'smart-router',
@@ -577,12 +601,12 @@ window.__ModuleLoader__.load({
         inject: () => ({ t }),
       }, () => h(SmartRouterSection, {
         t,
-        scope: ctx.settingsScope.bind({ namespace: NAMESPACE }),
+        colorScheme,
       })))
     }
 
     exports.name = name
-    exports.inject = ['slots', 'locale', 'settingsScope']
+    exports.inject = ['slots', 'locale', 'theme']
     exports.apply = apply
     return module.exports
   },
