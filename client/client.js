@@ -222,9 +222,28 @@ window.__ModuleLoader__.load({
     }
     /** Provider groups the pickers may offer (never the router itself). */
     const pickableGroups = (groups) => (groups ?? []).filter((g) => g.id !== 'smart-router')
+    /**
+     * Clear the model field when the new provider no longer lists the current
+     * model (or the provider was cleared), so the UI never shows a provider
+     * "not set" next to a stale model name.
+     */
+    const syncModel = (groups, provider, currentModel, onClear) => {
+      if (currentModel === '') return
+      const group = groups.find((g) => g.id === provider)
+      const stillValid = provider !== '' &&
+        (group?.models ?? []).some((m) => m.id === currentModel)
+      if (!stillValid) onClear()
+    }
 
     function Option({ value, label }) {
-      return h('option', { value }, label)
+      // Native dropdown lists do not reliably follow `color-scheme` inside
+      // this page (dark theme still rendered a white list with light text).
+      // Pin option colors explicitly so every option stays readable on any
+      // theme: white list, dark text, dark hover highlight.
+      return h('option', {
+        value,
+        style: { color: '#1b1b1f', background: '#ffffff' },
+      }, label)
     }
 
     /** Provider + model + effort selects for one tier row. */
@@ -246,11 +265,14 @@ window.__ModuleLoader__.load({
         const list = models
           .filter((m) => !visionOnly || m.vision !== false)
           .map((m) => ({ id: m.id, name: m.name, vision: m.vision }))
-        if (value.model !== '' && !list.some((m) => m.id === value.model)) {
+        // Only keep a stored model id that is not in the catalog when the
+        // provider is actually set; with no provider the model select shows
+        // "not set" instead of a stale model name.
+        if (value.provider !== '' && value.model !== '' && !list.some((m) => m.id === value.model)) {
           list.push({ id: value.model, name: value.model, vision: null })
         }
         return list
-      }, [chosen, value.model, visionOnly])
+      }, [chosen, value.provider, value.model, visionOnly])
 
       const chosenModel = modelOptions.find((m) => m.id === value.model)
       const effortOptions = useMemo(() => {
@@ -280,14 +302,28 @@ window.__ModuleLoader__.load({
             style: selectStyle,
             value: value.provider,
             disabled,
-            onChange: (e) => onChange('provider', e.target.value),
+            onChange: (e) => {
+              const next = e.target.value
+              onChange('provider', next)
+              // Keep model/effort only when the chosen provider still lists
+              // the current model; otherwise reset them to "not set" so a
+              // provider/model pair never shows a stale combination.
+              const group = groups.find((g) => g.id === next)
+              const stillValid = next !== '' &&
+                value.model !== '' &&
+                (group?.models ?? []).some((m) => m.id === value.model)
+              if (!stillValid) {
+                if (value.model !== '') onChange('model', '')
+                if (value.effort !== '') onChange('effort', '')
+              }
+            },
           },
             h(Option, { value: '', label: t('empty') }),
             providerOptions.map((p) => h(Option, { key: p.id, value: p.id, label: p.name })),
           ),
           h('select', {
             style: { ...selectStyle, maxWidth: 260 },
-            value: value.model,
+            value: value.provider === '' ? '' : value.model,
             disabled: disabled || value.provider === '',
             onChange: (e) => onChange('model', e.target.value),
           },
@@ -420,11 +456,18 @@ window.__ModuleLoader__.load({
       }
       const defaultModel = catalog.defaultModel
       const groups = pickableGroups(catalog.groups)
-      const groupSelect = (current, onChange) => h('select', {
+      // Provider select for the standalone rows (vision / fallback / llm
+      // classifier). `onModelReset` runs when the provider changes so a stale
+      // model name never survives a provider switch.
+      const groupSelect = (current, onProviderChange, onModelReset) => h('select', {
         style: { ...S.select, colorScheme },
         value: current,
         disabled: !writable,
-        onChange: (e) => onChange(e.target.value),
+        onChange: (e) => {
+          const next = e.target.value
+          onProviderChange(next)
+          onModelReset(next)
+        },
       },
         h(Option, { value: '', label: t('empty') }),
         groups
@@ -434,7 +477,7 @@ window.__ModuleLoader__.load({
       )
       const modelSelect = (provider, current, onChange, visionOnly) => h('select', {
         style: { ...S.select, maxWidth: 260, colorScheme },
-        value: current,
+        value: provider === '' ? '' : current,
         disabled: !writable || provider === '',
         onChange: (e) => onChange(e.target.value),
       },
@@ -442,7 +485,7 @@ window.__ModuleLoader__.load({
         (() => {
           const group = groups.find((g) => g.id === provider)
           let models = (group?.models ?? []).filter((m) => !visionOnly || m.vision !== false)
-          if (current !== '' && !models.some((m) => m.id === current)) {
+          if (provider !== '' && current !== '' && !models.some((m) => m.id === current)) {
             models = models.concat({ id: current, name: current, vision: null })
           }
           return models.map((m) => h(Option, { key: m.id, value: m.id, label: m.name }))
@@ -506,7 +549,11 @@ window.__ModuleLoader__.load({
         h('div', { style: S.card },
           h('div', { style: S.row },
             h('div', { style: { ...S.label, minWidth: 72 } }, t('tier.vision')),
-            groupSelect(String(value.visionProvider ?? ''), (v) => void write('visionProvider', v)),
+            groupSelect(
+              String(value.visionProvider ?? ''),
+              (v) => void write('visionProvider', v),
+              (next) => syncModel(groups, next, String(value.visionModel ?? ''), () => void write('visionModel', '')),
+            ),
             modelSelect(String(value.visionProvider ?? ''), String(value.visionModel ?? ''), (v) => void write('visionModel', v), true),
             (() => {
               const group = groups.find((g) => g.id === value.visionProvider)
@@ -536,7 +583,11 @@ window.__ModuleLoader__.load({
         h('div', { style: S.card },
           h('div', { style: S.row },
             h('div', { style: { ...S.label, minWidth: 72 } }, '↳'),
-            groupSelect(fallbackValue.provider, (v) => void write('fallbackProvider', v)),
+            groupSelect(
+              fallbackValue.provider,
+              (v) => void write('fallbackProvider', v),
+              (next) => syncModel(groups, next, fallbackValue.model, () => void write('fallbackModel', '')),
+            ),
             modelSelect(fallbackValue.provider, fallbackValue.model, (v) => void write('fallbackModel', v), false),
           ),
           h('div', { style: S.hint },
@@ -551,7 +602,11 @@ window.__ModuleLoader__.load({
               h('div', { style: S.title }, t('section.llm')),
               h('div', { style: S.card },
                 h('div', { style: S.row },
-                  groupSelect(llmValue.provider, (v) => void write('llmClassifierProvider', v)),
+                  groupSelect(
+                    llmValue.provider,
+                    (v) => void write('llmClassifierProvider', v),
+                    (next) => syncModel(groups, next, llmValue.model, () => void write('llmClassifierModel', '')),
+                  ),
                   modelSelect(llmValue.provider, llmValue.model, (v) => void write('llmClassifierModel', v), false),
                 ),
                 h('div', { style: S.hint }, t('llm.hint')),
