@@ -141,3 +141,69 @@ test('config POST surfaces settings validation failures', async () => {
   assert.equal(res.status, 400)
   assert.match(res.json.error, /config rejected/)
 })
+
+// ---------- vision-tier capability guard ----------
+
+/** Settings service plus an llm stub with configurable resolveModelInfo. */
+function visionCtx(settings, inputModalities) {
+  const llm = {
+    listProviders: () => [],
+    listConfigurableProviders: () => [],
+    resolveModelInfo: async (provider, model) => ({
+      provider,
+      id: model,
+      name: model,
+      inputModalities,
+    }),
+  }
+  const ctx = { get: (name) => (name === 'settings' ? settings : undefined), llm }
+  const captured = {}
+  ctx.webServer = { register: ({ handler }) => { captured.handler = handler; return () => {} } }
+  installModelsApi(ctx, () => ({ snapshot: () => ({}) }))
+  return { captured, settings }
+}
+
+test('config POST rejects a text-only model as the vision tier', async () => {
+  const { captured, settings } = visionCtx(
+    fakeSettings({ visionProvider: 'deepseek-official' }),
+    ['text'], // explicitly no image
+  )
+  const res = await invoke(
+    captured.handler,
+    fakeReq('POST', '/smart-router/api/config', { field: 'visionModel', value: 'deepseek-v4-pro' }),
+    fakeRes(),
+  )
+  assert.equal(res.status, 400)
+  assert.match(res.json.error, /does not accept image input/)
+  assert.equal(settings.writes.length, 0)
+})
+
+test('config POST allows vision-capable models in the vision tier', async () => {
+  const { captured, settings } = visionCtx(
+    fakeSettings({ visionProvider: 'ovh-vision' }),
+    ['text', 'image'],
+  )
+  const res = await invoke(
+    captured.handler,
+    fakeReq('POST', '/smart-router/api/config', { field: 'visionModel', value: 'Qwen2.5-VL-72B-Instruct' }),
+    fakeRes(),
+  )
+  assert.equal(res.status, 200)
+  assert.equal(res.json.ok, true)
+  assert.equal(settings.writes.length, 1)
+})
+
+test('config POST allows unknown-capability models in the vision tier', async () => {
+  const { captured, settings } = visionCtx(
+    fakeSettings({ visionProvider: 'some-provider' }),
+    undefined, // no metadata → unknown
+  )
+  const res = await invoke(
+    captured.handler,
+    fakeReq('POST', '/smart-router/api/config', { field: 'visionModel', value: 'mystery-model' }),
+    fakeRes(),
+  )
+  assert.equal(res.status, 200)
+  assert.equal(res.json.ok, true)
+  assert.equal(settings.writes.length, 1)
+})
