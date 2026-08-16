@@ -267,9 +267,13 @@ window.__ModuleLoader__.load({
           .map((m) => ({ id: m.id, name: m.name, vision: m.vision }))
         // Only keep a stored model id that is not in the catalog when the
         // provider is actually set; with no provider the model select shows
-        // "not set" instead of a stale model name.
+        // "not set" instead of a stale model name. A vision row must never
+        // surface a model that explicitly rejects image input.
         if (value.provider !== '' && value.model !== '' && !list.some((m) => m.id === value.model)) {
-          list.push({ id: value.model, name: value.model, vision: null })
+          const known = models.find((m) => m.id === value.model)
+          if (!visionOnly || known?.vision !== false) {
+            list.push({ id: value.model, name: value.model, vision: null })
+          }
         }
         return list
       }, [chosen, value.provider, value.model, visionOnly])
@@ -486,7 +490,10 @@ window.__ModuleLoader__.load({
           const group = groups.find((g) => g.id === provider)
           let models = (group?.models ?? []).filter((m) => !visionOnly || m.vision !== false)
           if (provider !== '' && current !== '' && !models.some((m) => m.id === current)) {
-            models = models.concat({ id: current, name: current, vision: null })
+            const known = (group?.models ?? []).find((m) => m.id === current)
+            if (!visionOnly || known?.vision !== false) {
+              models = models.concat({ id: current, name: current, vision: null })
+            }
           }
           return models.map((m) => h(Option, { key: m.id, value: m.id, label: m.name }))
         })(),
