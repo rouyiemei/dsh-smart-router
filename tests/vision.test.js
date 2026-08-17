@@ -29,6 +29,34 @@ test('messagesHaveImage / collectImageBlocks', () => {
   assert.deepEqual(blocks[0], { messageIndex: 0, blockIndex: 1, id: 'sha256:aaa' })
 })
 
+test('collectImageBlocks: recurses into tool-result blocks', () => {
+  const messages = [{
+    role: 'assistant',
+    content: [{ type: 'tool-result', content: [imageBlock('sha256:nested')] }],
+    source: { kind: 'model' },
+  }]
+  assert.equal(messagesHaveImage(messages), true)
+  const blocks = collectImageBlocks(messages)
+  assert.equal(blocks.length, 1)
+  assert.equal(blocks[0].id, 'sha256:nested')
+})
+
+test('replaceImages: replaces nested images inside tool-result blocks', async () => {
+  const nested = [{ role: 'assistant', content: [
+    { type: 'tool-result', content: [textBlock('before'), imageBlock('sha256:deep'), textBlock('after')] },
+  ], source: { kind: 'model' } }]
+  const ctx = { llm: fakeVisionLlm({ 'ovh-vision/Qwen2.5-VL-72B-Instruct': JSON_REPLY }) }
+  const settings = { visionProvider: 'ovh-vision', visionModel: 'Qwen2.5-VL-72B-Instruct', visionCacheTtl: 3600 }
+  const cache = fakeCache()
+  const stats = { record: () => {} }
+  const out = await replaceImages(ctx, settings, nested, undefined, cache, stats, () => {})
+  const inner = out[0].content[0].content
+  assert.equal(inner[0].text, 'before')
+  assert.equal(inner[1].type, 'text')
+  assert.ok(inner[1].text.includes('摘要'))
+  assert.equal(inner[2].text, 'after')
+})
+
 test('parseVisionReply: strict JSON', () => {
   const parsed = parseVisionReply('{"summary":"s","ocr":{"full_text":"t","lines":[]}}')
   assert.equal(parsed.summary, 's')
