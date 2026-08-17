@@ -12,11 +12,13 @@ test('namespace and provider ids are stable', () => {
   assert.deepEqual(TIER_ORDER, ['hard', 'normal', 'easy'])
 })
 
-test('defaults: enabled, heuristic, seeded free vision route', () => {
+test('defaults: enabled, heuristic, seeded free vision route, replace mode', () => {
   assert.equal(DEFAULTS.enabled, true)
   assert.equal(DEFAULTS.classifier, 'heuristic')
   assert.equal(DEFAULTS.visionProvider, 'ovh-vision')
   assert.equal(DEFAULTS.visionModel, 'Qwen2.5-VL-72B-Instruct')
+  assert.equal(DEFAULTS.visionMode, 'replace')
+  assert.equal(DEFAULTS.visionCacheTtl, 3600)
   assert.deepEqual(DEFAULTS.visionFallbacks, [])
   assert.equal(DEFAULTS.hardProvider, '')
 })
