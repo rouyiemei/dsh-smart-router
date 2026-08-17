@@ -1,7 +1,7 @@
 {
   "name": "dsh-smart-router",
   "description": "Automatic model routing for DeepSeek Harness: a virtual `smart` model classifies every request by difficulty (hard / normal / easy) and by vision need, then delegates to the models you already configured in Settings → Models. 内置智能路由：三级难度 + 视觉自动路由，模型从「设置-模型」已配置模型中选取，虚拟 smart 模型零配置接入。",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "main": "index.js",
   "types": "lib/types/index.d.ts",

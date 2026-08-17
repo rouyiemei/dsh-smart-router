@@ -65,6 +65,12 @@ SmartRouterAdapter.stream(request)
 | Default fallback | Empty = the session default model |
 | LLM classifier | Optional; defaults to the easy-tier model |
 
+**Reasoning effort two-tier hierarchy**: The reasoning effort in the chat input model selector (Off / High) is the **master switch**:
+- **Off**: reasoning disabled for all tiers (no extended thinking)
+- **High**: each tier uses the effort configured above (e.g. hardEffort=high, normalEffort=max, etc.)
+
+A hint explaining this is shown in the tier models section of the settings page.
+
 Manual config (`~/.dsh/profiles/web/settings.yaml`):
 
 ```yaml
@@ -100,7 +106,7 @@ The router only participates when the session model is `smart`; it never takes o
 ## Development
 
 ```sh
-npm test          # node --test tests/ (37 cases: classifier / chain / seed idempotency / schema)
+npm test          # node --test tests/ (80 cases: classifier / chain / vision sidecar / config API / seed idempotency / schema)
 ```
 
 Local install for debugging:

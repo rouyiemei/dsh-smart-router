@@ -70,6 +70,12 @@ SmartRouterAdapter.stream(请求)
 | 默认回退 | 留空 = 会话当前默认模型 |
 | LLM 分类器 | 可选，默认复用简单档模型 |
 
+**思考强度（推理）两级层级**：对话框模型选择器上的思考强度（Off / High）是**总开关**：
+- **Off**：所有难度等级都不使用思考模式（关闭 extended thinking）
+- **High**：各难度等级使用上方配置的推理强度（如 hardEffort=high、normalEffort=max 等）
+
+设置页各档模型区域会显示此提示。
+
 手写配置（`~/.dsh/profiles/web/settings.yaml` 或 profile 的 settings 提供方）：
 
 ```yaml
@@ -108,7 +114,7 @@ smart-router:
 ## 开发与测试
 
 ```sh
-npm test          # node --test tests/（37 个用例：分类器/路由链/seed 幂等/schema）
+npm test          # node --test tests/（80 个用例：分类器/路由链/视觉侧车/schema/配置 API/seed 幂等）
 ```
 
 本地挂载调试：
