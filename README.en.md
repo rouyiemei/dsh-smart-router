@@ -120,7 +120,9 @@ This plugin directly references the following open-source projects and DSH inter
 | [dylan121322/llm-adaptive](https://github.com/dylan121322/llm-adaptive) | Adapter-level routing: `registerAdapter` + `prepareCall().stream()` passthrough; LLM classifier rubric |
 | [BruceLanLan/dsh-tier-router](https://github.com/BruceLanLan/dsh-tier-router) | Tier config schema shape and fallback/escalation trade-offs |
 | [haiziyao/dsh-vision-mix](https://github.com/haiziyao/dsh-vision-mix) | Declaring `inputModalities: ['text','image']` at the adapter to pass DSH image admission (zero host patches) |
-| [ysr666/dsh-vision-router](https://github.com/ysr666/dsh-vision-router) | Free vision chain: anonymous OVHcloud endpoint (no key); image-admission analysis |
+| [liustack/modlens](https://github.com/liustack/modlens) | Structured vision evidence: summary/OCR/layout/semantics/visual/uncertainty template and the "vision parsing engine" prompt (source-level reference) |
+| [gloryxpnv/dsh-tool-vision](https://github.com/gloryxpnv/dsh-tool-vision) | Same structured JSON evidence template; the `vision-bridge` image→text replacement and fail-open pattern |
+| [ysr666/dsh-vision-router](https://github.com/ysr666/dsh-vision-router) | Free vision chain: anonymous OVHcloud endpoint (no key); image-admission analysis; per-image caching |
 | [s3yf1337/dsh-easyvision](https://github.com/s3yf1337/dsh-easyvision) | Reading model vision capability via `resolveModelInfo().inputModalities` |
 | [akqwpeter-prog/dsh-media-skills](https://github.com/akqwpeter-prog/dsh-media-skills) | Idempotent free-vision route seeding into `llm-pi-ai` (zhipu-vision) |
 | DeepSeek Harness internals | `dsh-llm` (LlmAdapter / llm service / prepareCall contract), `dsh-settings` (installSettingsSection), `dsh-agent-loop` (agent/request waterfall), `dsh-client-modules` (client bundle contract) |
