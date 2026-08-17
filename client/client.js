@@ -63,6 +63,10 @@ window.__ModuleLoader__.load({
       provider: '提供方',
       model: '模型',
       effort: '思考档位',
+      'effort.hint':
+        '对话框模型选择器上的思考强度（Off / High）是总开关：' +
+        '选择 Off 则所有难度等级都不使用思考模式；' +
+        '选择 High 则各难度等级使用上方配置的推理强度。',
       reset: '重置',
       'reset.all': '恢复默认设置',
       'vision.ok': '支持图片',
@@ -124,6 +128,10 @@ window.__ModuleLoader__.load({
       provider: 'Provider',
       model: 'Model',
       effort: 'Effort',
+      'effort.hint':
+        'The reasoning effort in the chat input model selector (Off / High) is the master switch: ' +
+        'Off disables reasoning for all tiers; ' +
+        'High lets each tier use the effort configured above.',
       reset: 'Reset',
       'reset.all': 'Restore defaults',
       'vision.ok': 'Vision',
@@ -554,6 +562,7 @@ window.__ModuleLoader__.load({
         h('div', { style: S.title }, t('section.tiers')),
         h('div', { style: S.card },
           h('div', { style: S.hint }, t('sameVendor')),
+          h('div', { style: S.hint }, t('effort.hint')),
           TIERS.map((tier) => h(RouteRow, {
             key: tier.key,
             t,
