@@ -38,13 +38,16 @@ dsh plugin --profile web add dsh-smart-router
         ▼
 SmartRouterAdapter.stream(请求)
         │
-        ├─ 消息含图？ ──→ 视觉档（默认免费匿名 OVH，可换自配视觉模型）──┐
-        │                                                            │
-        └─ 否则：难度分类 ──→ hard → 困难档                             │
-             （启发式默认 / LLM 可选）──→ normal → 一般档                │
-                                  └─→ easy → 简单档                    │
-        │                                                            │
-        ▼                                                            ▼
+        ├─ 消息含图？ ──→ 视觉侧车（默认 replace 模式）：
+        │       图块分割 → 视觉模型返回结构化证据（摘要/OCR/版面）
+        │       → 替换回文本（按附件缓存 1h）→ 继续走下方难度分类
+        │       （visionMode=route 时：整段路由到视觉档，旧行为）
+        │
+        └─ 纯文本：难度分类 ──→ hard → 困难档
+             （启发式默认 / LLM 可选）──→ normal → 一般档
+                                  └─→ easy → 简单档
+        │
+        ▼
    ctx.llm.prepareCall({provider, model}).stream(请求)  ← 透传 DSH 流式协议
         │
         └─ 档位缺失 → 困难→一般→简单→默认模型 阶梯回退；全部失败才报错
@@ -52,6 +55,7 @@ SmartRouterAdapter.stream(请求)
 
 - 路由在 **LLM 适配器层**完成（参考 llm-adaptive / dsh-vision-mix 的架构）：注册虚拟 provider，`stream()` 内按请求内容决策后经 `prepareCall().stream()` 转发，**不修改宿主源码**，与其它视觉插件互不冲突。
 - 分类器两种模式：**启发式**（默认，零成本零延迟，关键词 + 代码量 + 文件引用数评分）；**LLM**（更准，复用简单档模型做一次小调用，带 120s 缓存）。
+- **视觉模型只做辅助**：图片被分割出去，由视觉模型返回结构化证据（参考 modlens / dsh-tool-vision 的 evidence 方案：摘要 + OCR 全文 + 版面阅读顺序 + 实体 + 主色调 + 不确定项），替换回原图块位置后再由三级难度模型作答；证据按附件 id 缓存（默认 1 小时），分析失败时图块降级为占位文本，请求不中断。
 - 视觉准入：虚拟模型声明 `inputModalities: ['text', 'image']`，DSH 的图片预检（`MODEL_DOES_NOT_SUPPORT_IMAGES`）直接放行——不需要打宿主补丁（对比 dsh-easyvision 的 patch 方案）。
 
 ## 设置说明（设置 → 智能路由）
@@ -62,6 +66,7 @@ SmartRouterAdapter.stream(请求)
 | 分类方式 | `heuristic` 启发式（默认） / `llm` LLM 分类 |
 | 困难 / 一般 / 简单 | 各档 { 提供方, 模型, 思考档位 }，留空 = 未配置（阶梯回退） |
 | 视觉 | 默认 `ovh-vision / Qwen2.5-VL-72B-Instruct`（免费匿名）；可换任何自配视觉模型 |
+| 视觉处理方式 | `replace` 结构化替换（默认，图块→证据文本→难度分类） / `route` 整段路由到视觉模型 |
 | 默认回退 | 留空 = 会话当前默认模型 |
 | LLM 分类器 | 可选，默认复用简单档模型 |
 
@@ -79,6 +84,8 @@ smart-router:
   easyModel: deepseek-flash
   visionProvider: zhipu-vision # 免费额度，需在 设置→模型 填入 GLM_API_KEY
   visionModel: glm-4v-flash
+  visionMode: replace          # replace（结构化替换，默认）| route（整段路由）
+  visionCacheTtl: 3600         # 视觉证据缓存秒数，0 = 关闭
   visionFallbacks: []
   fallbackProvider: ''
   fallbackModel: ''
@@ -121,7 +128,9 @@ dsh --profile web --dump-config | grep smart-router          # 确认已挂载
 | [dylan121322/llm-adaptive](https://github.com/dylan121322/llm-adaptive) | adapter 级路由架构：`registerAdapter` + `prepareCall().stream()` 透传；LLM 分类器判定标准 |
 | [BruceLanLan/dsh-tier-router](https://github.com/BruceLanLan/dsh-tier-router) | 档位配置 schema 与阶梯回退、失败升级的取舍 |
 | [haiziyao/dsh-vision-mix](https://github.com/haiziyao/dsh-vision-mix) | 在 adapter 层声明 `inputModalities: ['text','image']` 通过 DSH 图片准入（零宿主补丁） |
-| [ysr666/dsh-vision-router](https://github.com/ysr666/dsh-vision-router) | 免费视觉链方案：OVHcloud 匿名端点（免 Key）；图片准入机制分析 |
+| [liustack/modlens](https://github.com/liustack/modlens) | 结构化视觉证据方案：summary/OCR/layout/semantics/visual/uncertainty 模板与「vision parsing engine」提示词（源码级参考） |
+| [gloryxpnv/dsh-tool-vision](https://github.com/gloryxpnv/dsh-tool-vision) | 同款结构化 JSON 证据模板；`vision-bridge` 图块→描述文本替换、失败保持宿主行为的模式 |
+| [ysr666/dsh-vision-router](https://github.com/ysr666/dsh-vision-router) | 免费视觉链方案：OVHcloud 匿名端点（免 Key）；图片准入机制分析；按图内容缓存 |
 | [s3yf1337/dsh-easyvision](https://github.com/s3yf1337/dsh-easyvision) | 用 `resolveModelInfo().inputModalities` 判读模型视觉能力的模式 |
 | [akqwpeter-prog/dsh-media-skills](https://github.com/akqwpeter-prog/dsh-media-skills) | 向 `llm-pi-ai` 幂等 seed 免费视觉路由（zhipu-vision）的模式 |
 | DeepSeek Harness 内部 | `dsh-llm`（LlmAdapter/llm 服务/prepareCall 契约）、`dsh-settings`（installSettingsSection）、`dsh-agent-loop`（agent/request 瀑布）、`dsh-client-modules`（客户端 bundle 契约） |
