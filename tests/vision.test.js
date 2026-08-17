@@ -10,7 +10,9 @@ import {
   replaceImages,
 } from '../lib/vision.js'
 
-const imageBlock = (id) => ({ type: 'image', attachment: { id, mediaType: 'image/png' } })
+// The REAL DSH ImageAttachmentRef uses `attachmentId` (dsh-attachment types);
+// the legacy `id` spelling is tolerated by the collector as a fallback.
+const imageBlock = (id) => ({ type: 'image', attachment: { attachmentId: id, mediaType: 'image/png', bytes: 1, width: 1, height: 1 } })
 const textBlock = (text) => ({ type: 'text', text })
 
 function messagesWithImage() {
@@ -26,7 +28,10 @@ test('messagesHaveImage / collectImageBlocks', () => {
   assert.equal(messagesHaveImage(undefined), false)
   const blocks = collectImageBlocks(messagesWithImage())
   assert.equal(blocks.length, 1)
-  assert.deepEqual(blocks[0], { messageIndex: 0, blockIndex: 1, id: 'sha256:aaa' })
+  assert.equal(blocks[0].messageIndex, 0)
+  assert.equal(blocks[0].blockIndex, 1)
+  assert.equal(blocks[0].id, 'sha256:aaa')
+  assert.equal(blocks[0].attachment.attachmentId, 'sha256:aaa')
 })
 
 test('collectImageBlocks: recurses into tool-result blocks', () => {
@@ -55,6 +60,42 @@ test('replaceImages: replaces nested images inside tool-result blocks', async ()
   assert.equal(inner[1].type, 'text')
   assert.ok(inner[1].text.includes('摘要'))
   assert.equal(inner[2].text, 'after')
+})
+
+test('collectImageBlocks: legacy `id` spelling is tolerated (attachmentId fallback)', () => {
+  const legacy = [{ role: 'user', content: [{ type: 'image', attachment: { id: 'sha256:old' } }], source: { kind: 'user' } }]
+  const blocks = collectImageBlocks(legacy)
+  assert.equal(blocks.length, 1)
+  assert.equal(blocks[0].id, 'sha256:old')
+})
+
+test('replaceImages: the vision call receives the ORIGINAL attachment ref (attachmentId field)', async () => {
+  let received = null
+  const llm = {
+    calls: [],
+    async prepareCall(config) {
+      const resolvedConfig = {
+        provider: config.provider,
+        model: config.model,
+        ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
+      }
+      return {
+        config: resolvedConfig,
+        async *stream(forwarded) {
+          received = forwarded.messages[0].content.find((b) => b.type === 'image')?.attachment ?? null
+          yield { type: 'text-delta', index: 0, text: JSON_REPLY }
+        },
+      }
+    },
+  }
+  const ctx = { llm }
+  const settings = { visionProvider: 'ovh-vision', visionModel: 'Qwen2.5-VL-72B-Instruct', visionCacheTtl: 3600 }
+  const cache = fakeCache()
+  const stats = { record: () => {} }
+  await replaceImages(ctx, settings, messagesWithImage(), undefined, cache, stats, () => {})
+  assert.ok(received !== null, 'vision call must include the image block')
+  assert.equal(received.attachmentId, 'sha256:aaa')
+  assert.equal(received.mediaType, 'image/png')
 })
 
 test('parseVisionReply: strict JSON', () => {
