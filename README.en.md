@@ -1,14 +1,26 @@
 # dsh-smart-router · Smart model routing for DeepSeek Harness
 
-> Automatic model switching while DSH works: three difficulty tiers (hard / normal / easy) plus vision routing.
-> Tier models are picked from the models you **already configured** under Settings → Models — no re-entering endpoints or API keys.
-> Select one virtual model, "Smart Router (auto route)", and let the classifier do the rest.
+English · [简体中文](README.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-4D6BFE)](https://github.com/topics/dsh-plugin)
 [![dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-blue)](https://github.com/topics/dsh-plugin)
 
-English · [简体中文](README.md)
+## Why this exists
+
+In August 2026, DeepSeek raised prices across the V4 family and introduced peak/off-peak pricing. Flash output tokens jumped from ¥2 to ¥4.5 (¥9 at peak); Pro went up 3–5×. My monthly bill went from ¥120 to ¥700+.
+
+I tried everything. OpenCode Go's "affordable subscription" turned out to be the same official price with a monthly cap. MiMo-V2.5 was cheap but too weak for real coding. GLM-5.1 and Kimi K3 cost more than Flash. Subscription plans didn't help either — Xiaomi's Token Plan Pro covered my usage but couldn't match the quality; Zhipu's Coding Plan was too tight; Google AI Pro and ChatGPT subscriptions don't offer API access.
+
+No single option could deliver both "no quality loss" and "affordable price."
+
+887M tokens/month, 80% cached input — that was my usage profile with DS Flash. The price hike hit output tokens hardest, and most of my output was thinking tokens I couldn't just turn off.
+
+Then it clicked: **instead of finding one cheaper model to replace everything, let the same system call different models for different tasks.** Simple file operations, formatting, and Q&A go to the cheap model; real reasoning and complex coding stay on Flash. Distribute on demand, not one-size-fits-all.
+
+That's how dsh-smart-router was born. It's not an architectural breakthrough — just a practical tool born from sticker shock, routing each request to the best-fit model so you can find your own balance between capability and cost.
+
+> If AI API bills have ever stung you, hopefully this small tool saves you some money.
 
 ## What it solves
 

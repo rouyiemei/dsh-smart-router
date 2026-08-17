@@ -1,14 +1,26 @@
 # dsh-smart-router · DSH 智能路由插件
 
-> 让 DeepSeek Harness 在工作时**自动切换模型**：三级难度（困难 / 一般 / 简单）+ 视觉任务路由。
-> 各档模型从你在「设置 → 模型」中**已经配置好**的模型里选取，不重复录入地址与 Key。
-> 选一个虚拟模型「Smart Router（自动路由）」，剩下的交给分类器。
+[English](README.en.md) · 简体中文
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-4D6BFE)](https://github.com/topics/dsh-plugin)
 [![dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-blue)](https://github.com/topics/dsh-plugin)
 
-English · [简体中文](README.md)
+## 为什么做这个插件
+
+2026 年 8 月，DeepSeek V4 系列全面涨价并启用峰谷定价。Flash 的 output 价格从 ¥2 翻倍到 ¥4.5（高峰 ¥9），Pro 更是涨了 3–5 倍。我的月账单从 ¥120 飙到了 ¥700+。
+
+我开始疯狂寻找替代方案。OpenCode Go 号称"低价订阅"，实际上是把官方价格原样卖给你，还限了量；MiMo-V2.5 便宜但写代码力不从心；GLM-5.1 和 Kimi K3 的定价比 Flash 还贵。订阅计划也研究了个遍——小米的 Token Plan Pro 覆盖得了用量但性能过不了自己那关，智谱的 Coding Plan 额度太紧，Google AI Pro 和 ChatGPT 订阅都不提供 API。
+
+算来算去，没有任何一个方案能同时满足"性能不降、价格可接受"。
+
+887M tokens/月，80% 是缓存命中的 input——这是我用 DS Flash 积累下来的用量结构。调价后 output 涨价才是费用暴涨的主因，而 output 里一大半是 thinking tokens，又不能完全关掉。
+
+最后我想明白了：**与其找一个便宜的模型来替代，不如让同一个系统在不同任务上调用不同的模型。** 简单的文件操作、格式化、问答交给便宜模型；需要真正推理、复杂编码的时候再上 Flash。按需分配，而不是一刀切。
+
+这就是 dsh-smart-router 的由来。它不是什么高大上的架构创新，只是一个被涨价逼出来的实用工具：根据任务复杂度自动路由到最合适的模型，让你在能力和成本之间找到属于自己的平衡点。
+
+> 如果你也被 AI API 的账单刺痛过，希望这个小工具能帮你省下一些钱。
 
 ## 它解决什么问题
 
