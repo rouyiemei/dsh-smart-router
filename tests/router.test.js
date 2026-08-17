@@ -294,10 +294,11 @@ test('stream: strips inherited reasoningEffort and applies the tier effort', asy
   })
 })
 
-test('stream: vision request delegates to the vision tier', async () => {
+test('stream: visionMode route — image request delegates to the vision tier (legacy)', async () => {
   const llm = fakeLlm({ 'ovh-vision/Qwen2.5-VL-72B-Instruct': [] })
   const ctx = { get: () => undefined, llm, logger: { info: () => {} } }
   const router = new SmartRouterAdapter(ctx, () => settings({
+    visionMode: 'route',
     visionProvider: 'ovh-vision',
     visionModel: 'Qwen2.5-VL-72B-Instruct',
   }))
@@ -307,6 +308,30 @@ test('stream: vision request delegates to the vision tier', async () => {
     provider: 'ovh-vision',
     model: 'Qwen2.5-VL-72B-Instruct',
   })
+})
+
+test('stream: visionMode replace (default) — image request is analyzed then routed by difficulty', async () => {
+  // The vision sidecar asks the vision model for structured evidence; the
+  // turn then flows through the difficulty tiers like a text request.
+  const llm = fakeLlm({
+    'ovh-vision/Qwen2.5-VL-72B-Instruct': [
+      { type: 'text-delta', index: 0, text: '{"summary":"a cat","ocr":{"full_text":"MEOW","lines":[]},"layout":{"regions":[]},"semantics":{"scene":"cat","entities":[]},"visual":{"dominant_colors":[]},"uncertainty":[]}' },
+    ],
+    'deepseek-official/deepseek-chat': [],
+  })
+  const ctx = { get: () => undefined, llm, logger: { info: () => {} } }
+  const router = new SmartRouterAdapter(ctx, () => settings({
+    visionProvider: 'ovh-vision',
+    visionModel: 'Qwen2.5-VL-72B-Instruct',
+    normalProvider: 'deepseek-official',
+    normalModel: 'deepseek-chat',
+  }))
+  const chunks = await collect(router.stream(optionsFor('看图', { withImage: true })))
+  // first call = vision analysis; second call = the difficulty-tier model
+  assert.equal(llm.calls.length, 2)
+  assert.equal(llm.calls[0].config.provider, 'ovh-vision')
+  assert.equal(llm.calls[1].config.provider, 'deepseek-official')
+  assert.equal(chunks[0].text, '[deepseek-official/deepseek-chat]')
 })
 
 test('stream: falls back to the next route when prepareCall fails', async () => {
